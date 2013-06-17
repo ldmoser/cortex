@@ -268,11 +268,13 @@ void Primitive::render( const State *currentState, IECore::TypeId style ) const
 void Primitive::addUniformAttribute( const std::string &name, IECore::ConstDataPtr data )
 {
 	m_uniformAttributes[name] = data->copy();
+	m_shaderSetups.clear();
 }
 
 void Primitive::addVertexAttribute( const std::string &name, IECore::ConstDataPtr data )
 {
 	m_vertexAttributes[name] = data->copy();
+	m_shaderSetups.clear();
 }
 		
 bool Primitive::depthSortRequested( const State * state ) const

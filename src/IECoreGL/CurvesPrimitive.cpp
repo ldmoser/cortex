@@ -143,6 +143,8 @@ void CurvesPrimitive::addPrimitiveVariable( const std::string &name, const IECor
 		}
 	}
 	Primitive::addPrimitiveVariable( name, primVar );
+
+	m_memberData->geometrySetups.clear();
 }
 
 const Shader::Setup *CurvesPrimitive::shaderSetup( const Shader *shader, State *state ) const
