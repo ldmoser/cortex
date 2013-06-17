@@ -48,6 +48,8 @@
 #include "IECoreGL/Camera.h"
 #include "IECoreGL/Renderable.h"
 #include "IECoreGL/Group.h"
+#include "IECoreGL/MeshPrimitive.h"
+#include "IECoreGL/CurvesPrimitive.h"
 
 #include "IECoreMaya/Convert.h"
 #include "IECoreMaya/ToMayaMeshConverter.h"
@@ -69,6 +71,7 @@
 #include "IECore/TransformOp.h"
 #include "IECore/CoordinateSystem.h"
 #include "IECore/Transform.h"
+#include "IECore/SceneCache.h"
 
 #include "maya/MFnNumericAttribute.h"
 #include "maya/MFnEnumAttribute.h"
@@ -135,7 +138,7 @@ MObject SceneShapeInterface::aBoundCenterZ;
 
 
 SceneShapeInterface::SceneShapeInterface()
-	: m_previewSceneDirty( true )
+	: m_previewSceneDirty( true ), m_previewSceneAnimationDirty(false), m_sceneCanUpdate(false)
 {
 }
 
@@ -257,10 +260,12 @@ MStatus SceneShapeInterface::initialize()
 	gAttr.addNumericDataAccept( MFnNumericData::k3Double );
 	gAttr.setReadable( true );
 	gAttr.setWritable( false );
+	gAttr.setStorable( false );
+	gAttr.setConnectable( true );
+	gAttr.setHidden( true );
 	gAttr.setArray( true );
 	gAttr.setIndexMatters( true );
 	gAttr.setUsesArrayDataBuilder( true );
-	gAttr.setStorable( false );
 
 	s = addAttribute( aOutputObjects );
 
@@ -318,12 +323,9 @@ MStatus SceneShapeInterface::initialize()
 	cAttr.addChild( aTranslate );
 	cAttr.addChild( aRotate );
 	cAttr.addChild( aScale );
-	cAttr.setReadable( true );
-	cAttr.setWritable( false );
 	cAttr.setArray( true );
 	cAttr.setIndexMatters( true );
 	cAttr.setUsesArrayDataBuilder( true );
-	cAttr.setStorable( false );
 	
 	s = addAttribute( aTransform );
 	
@@ -384,7 +386,6 @@ MStatus SceneShapeInterface::initialize()
 	cAttr.setArray( true );
 	cAttr.setIndexMatters( true );
 	cAttr.setUsesArrayDataBuilder( true );
-	cAttr.setStorable( false );
 	
 	s = addAttribute( aBound );
 	assert( s );
@@ -401,6 +402,7 @@ MStatus SceneShapeInterface::initialize()
 	genAttr.setWritable( false );
 	genAttr.setStorable( false );
 	genAttr.setConnectable( true );
+	genAttr.setHidden( true );
 	genAttr.setArray( true );
 	genAttr.setIndexMatters( true );
 	genAttr.setUsesArrayDataBuilder( true );
@@ -413,7 +415,6 @@ MStatus SceneShapeInterface::initialize()
 	cAttr.setIndexMatters( true );
 	cAttr.setUsesArrayDataBuilder( true );
 	cAttr.setReadable( true );
-	cAttr.setStorable( false );
 	
 	s = addAttribute( aAttributes );
 	
@@ -517,7 +518,17 @@ MStatus SceneShapeInterface::setDependentsDirty( const MPlug &plug, MPlugArray &
 		// Check if sceneInterface is animated. If not, plugs are not dependent on time
 		if( !sceneInterface || ( sceneInterface && sceneInterface -> numBoundSamples() > 1 ) )
 		{
-			m_previewSceneDirty = true;
+			if ( !m_previewSceneDirty )
+			{
+				if ( m_sceneCanUpdate )
+				{
+					m_previewSceneAnimationDirty = true;
+				}
+				else
+				{
+					m_previewSceneDirty = true;
+				}
+			}
 			childChanged( kBoundingBoxChanged ); // needed to tell maya the bounding box has changed
 			
 			// Need to go through all output plugs, since Maya doesn't propagate dirtiness from parent plug to the children in setDependentsDirty
@@ -679,7 +690,7 @@ MStatus SceneShapeInterface::compute( const MPlug &plug, MDataBlock &dataBlock )
 		}
 		else if( topLevelPlug == aOutputObjects && scene->hasObject() )
 		{
-			MArrayDataHandle outputDataHandle = dataBlock.outputArrayValue( aOutputObjects, &s );
+			MArrayDataHandle outputDataHandle = dataBlock.outputValue( aOutputObjects, &s );
 			MArrayDataBuilder outputBuilder = outputDataHandle.builder();
 
 			ObjectPtr object = scene->readObject( time.as( MTime::kSeconds ) );
@@ -1012,6 +1023,33 @@ void SceneShapeInterface::recurseBuildScene( IECoreGL::Renderer * renderer, cons
 	if( drawGeometry && subSceneInterface->hasObject() )
 	{
 		ObjectPtr object = subSceneInterface->readObject( time );
+
+		/// test for the compatible object types we support animating the scene
+		if ( object->typeId() == IECore::MeshPrimitiveTypeId )
+		{
+			/// currently we only support Meshes...
+			// \todo add suport for at least coordinate systems and curves. And maybe for other things we replace the whole IECoreGL.Group
+
+			// We also don't support updating the scene, if there's any shape that changes topology
+			// \todo consider adding support for changing topology by replacing the entire geometry by a new one (using the CachedConverter).
+			if ( subSceneInterface->hasAttribute( SceneCache::animatedObjectTopologyAttribute ) )
+			{
+				m_sceneCanUpdate = false;
+			}
+		}
+		else
+		{
+			m_sceneCanUpdate = false;
+		}
+
+		/// disable instancing for objects that we will update (also for the bounds if drawn).
+//\todo This slows down a lot the load times because we don't have a cache of primVars triangulation and work is redone for each instance....
+/// \todo should it have another attribute to force copyOnInstancing? or an attribute in the rednerer "gl:willEditScene" that does the same?
+		if ( m_sceneCanUpdate && subSceneInterface->hasAttribute( SceneCache::animatedObjectPrimVarsAttribute ) )
+		{
+			renderer->setAttribute("gl:automaticInstancing", new BoolData( false ) );
+		}
+
 		Renderable *o = runTimeCast< Renderable >(object.get());
 		if( o )
 		{
@@ -1049,53 +1087,188 @@ void SceneShapeInterface::recurseBuildScene( IECoreGL::Renderer * renderer, cons
 
 IECoreGL::ConstScenePtr SceneShapeInterface::glScene()
 {
-	if(!m_previewSceneDirty)
+	if(!m_previewSceneDirty && !m_previewSceneAnimationDirty)
 	{
 		return m_scene;
 	}
+
+	IECoreGL::ConstStatePtr defaultState = IECoreGL::State::defaultState();
 
 	ConstSceneInterfacePtr sceneInterface = getSceneInterface();
 
 	if( sceneInterface )
 	{
-		SceneInterface::NameList childNames;
-		sceneInterface->childNames( childNames );
-
-		IECoreGL::RendererPtr renderer = new IECoreGL::Renderer();
-		renderer->setOption( "gl:mode", new StringData( "deferred" ) );
-		// Always draw locators. They can be hidden by using tags.
-		renderer->setOption( "gl:drawCoordinateSystems", new BoolData( true ) );
-		
-		renderer->worldBegin();
+		if ( !m_previewSceneDirty && m_previewSceneAnimationDirty )
 		{
-			buildScene( renderer, sceneInterface );
+			/// update meshes in-place
+			updateScene();
 		}
-		renderer->worldEnd();
+		else	// the whole scene is dirty
+		{
+			SceneInterface::NameList childNames;
+			sceneInterface->childNames( childNames );
+
+			IECoreGL::RendererPtr renderer = new IECoreGL::Renderer();
+			renderer->setOption( "gl:mode", new StringData( "deferred" ) );
+			// Always draw locators. They can be hidden by using tags.
+			renderer->setOption( "gl:drawCoordinateSystems", new BoolData( true ) );
+
+			/// we assume this scene can be updated and buildScene may find that this is not the case...		
+			m_sceneCanUpdate = true;
+
+			renderer->worldBegin();
+			{
+				buildScene( renderer, sceneInterface );
+			}
+			renderer->worldEnd();
 	
-		m_scene = renderer->scene();
-		m_scene->setCamera( 0 );
+			m_scene = renderer->scene();
+			m_scene->setCamera( 0 );
+
+			// Update component name to group map
+			m_nameToGroupMap.clear();
+			m_indexToNameMap.clear();
+			buildGroups( defaultState->get<const IECoreGL::NameStateComponent>(), m_scene->root() );
+		}
+	}
+	else
+	{
+		m_nameToGroupMap.clear();
+		m_indexToNameMap.clear();
 	}
 
-	// Update component name to group map
-	m_nameToGroupMap.clear();
-	m_indexToNameMap.clear();
-	IECoreGL::ConstStatePtr defaultState = IECoreGL::State::defaultState();
-	buildGroups( defaultState->get<const IECoreGL::NameStateComponent>(), m_scene->root() );
-
 	m_previewSceneDirty = false;
+	m_previewSceneAnimationDirty = false;
 
 	return m_scene;
 }
 
-void SceneShapeInterface::buildGroups( IECoreGL::ConstNameStateComponentPtr nameState, IECoreGL::GroupPtr group )
+void SceneShapeInterface::updateScene()
+{
+	MPlug pTime( thisMObject(), aTime );
+	MTime mayaTime;
+	pTime.getValue( mayaTime );
+	double time = mayaTime.as( MTime::kSeconds );
+
+	MPlug pDrawGeometry( thisMObject(), aDrawGeometry );
+	bool drawGeometry;
+	pDrawGeometry.getValue( drawGeometry );
+
+	MPlug pDrawBounds( thisMObject(), aDrawChildBounds );
+	bool drawBounds;
+	pDrawBounds.getValue( drawBounds );
+
+	ConstSceneInterfacePtr mainScene = getSceneInterface();
+	SceneInterface::Path rootPath, relativePath, currPath;
+	mainScene->path( rootPath );
+
+	for ( NameToGroupMap::const_iterator it = m_nameToGroupMap.begin(); it != m_nameToGroupMap.end(); it++ )
+	{
+		const IECore::InternedString &name = it->first;
+
+		SceneInterface::stringToPath( name.value(), relativePath );
+		currPath = rootPath;
+		currPath.insert( currPath.end(), relativePath.begin(), relativePath.end() );
+
+		ConstSceneInterfacePtr childScene = mainScene->scene( currPath );
+		if ( !childScene->hasObject() )
+		{
+			continue;
+		}
+
+		InternedStringVectorDataPtr varNames(0);
+		if ( childScene->hasAttribute( SceneCache::animatedObjectPrimVarsAttribute ) )
+		{
+			varNames = runTimeCast< InternedStringVectorData >( childScene->readAttribute( SceneCache::animatedObjectPrimVarsAttribute, time ) );
+		}
+
+		if ( !varNames )
+		{
+			continue;
+		}
+
+		const IECoreGL::Group *group = it->second.second;
+		const IECoreGL::Group::ChildContainer &children = group->children();
+
+		IECoreGL::Group::ChildContainer::const_iterator it = children.begin();
+		if ( drawGeometry )
+		{
+			bool foundObject = false;
+			for ( ; it != children.end(); ++it )
+			{
+				if ( (*it)->typeId() == (IECore::TypeId)IECoreGL::GroupTypeId )
+				{
+					IECoreGL::Group *gObject = staticPointerCast< IECoreGL::Group >( *it );
+					for ( IECoreGL::Group::ChildContainer::const_iterator it2 = gObject->children().begin(); it2 != gObject->children().end(); ++it2 )
+					{
+						if ( !foundObject && (*it2)->typeId() == (IECore::TypeId)IECoreGL::MeshPrimitiveTypeId )
+						{
+							IECoreGL::MeshPrimitive *mesh = staticPointerCast< IECoreGL::MeshPrimitive >( *it2 );
+	
+							IECore::PrimitiveVariableMap varMap = childScene->readObjectPrimitiveVariables( varNames->readable(), time );
+							for ( IECore::PrimitiveVariableMap::const_iterator it = varMap.begin(); it != varMap.end(); it++ )
+							{
+								mesh->addPrimitiveVariable( it->first, it->second );
+							}
+							foundObject = true;
+							break;
+						}
+					}
+				}
+				if ( foundObject )
+					break;
+			}
+		}
+		if ( drawBounds )
+		{
+			Box3d b = childScene->readBound( time );
+			Box3f bbox( b.min, b.max );
+			CurvesPrimitivePtr newBox = CurvesPrimitive::createBox( bbox );
+
+			bool foundObject = false;
+			for ( ; it != children.end(); ++it )
+			{
+				if ( (*it)->typeId() == (IECore::TypeId)IECoreGL::GroupTypeId )
+				{
+					IECoreGL::Group *gBound = staticPointerCast< IECoreGL::Group >( *it );
+					for ( IECoreGL::Group::ChildContainer::const_iterator it2 = gBound->children().begin(); it2 != gBound->children().end(); ++it2 )
+					{
+						if ( (*it2)->typeId() == (IECore::TypeId)IECoreGL::GroupTypeId )
+						{
+							IECoreGL::Group *gBox = staticPointerCast< IECoreGL::Group >( *it2 );
+							for ( IECoreGL::Group::ChildContainer::const_iterator it3 = gBox->children().begin(); it3 != gBox->children().end(); ++it3 )
+							{
+								if ( (*it3)->typeId() == (IECore::TypeId)IECoreGL::CurvesPrimitiveTypeId )
+								{
+									IECoreGL::CurvesPrimitive *curves = staticPointerCast< IECoreGL::CurvesPrimitive >( *it3 );
+									curves->addPrimitiveVariable( "P", newBox->variables["P"] );
+									foundObject = true;
+									break;
+								}
+							}
+						}
+						if ( foundObject )
+							break;
+					}
+				}
+				if ( foundObject )
+					break;
+			}
+		}
+	}
+}
+
+void SceneShapeInterface::buildGroups( const IECoreGL::NameStateComponent *nameState, IECoreGL::Group *group )
 {
 	assert( nameState );
 	assert( group );
 	assert( group->getState() );
 
-	if (  group->getState()->get< IECoreGL::NameStateComponent >() )
+	const IECoreGL::NameStateComponent *newName = group->getState()->get< IECoreGL::NameStateComponent >();
+
+	if (  newName )
 	{
-		nameState = group->getState()->get< IECoreGL::NameStateComponent >();
+		nameState = newName;
 	}
 
 	const std::string &name = nameState->name();
