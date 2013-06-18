@@ -170,17 +170,21 @@ class SceneShapeInterface: public MPxComponentShape
 
 		bool m_sceneInterfaceDirty;
 		bool m_previewSceneDirty;
+		bool m_previewSceneAnimationDirty;
+		bool m_sceneCanUpdate;
 
 		IECoreGL::ScenePtr m_scene;
 		
 		/// Uses the sceneInterface hierarchy to build a GL Scene matching the preview plug values
 		void buildScene( IECoreGL::RendererPtr renderer, IECore::ConstSceneInterfacePtr subSceneInterface );
 
+		void updateScene();
+
 		/// Recursively parses the sceneInterface hierarchy to build a GL Scene matching the preview plug values
 		void recurseBuildScene( IECoreGL::Renderer * renderer, const IECore::SceneInterface *subSceneInterface, double time, bool drawBounds, bool drawGeometry, bool objectOnly, const IECore::SceneInterface::NameList &drawTags );
 
 		/// Recursively parses glScene to store GL Groups matching path names
-		void buildGroups( IECoreGL::ConstNameStateComponentPtr nameState, IECoreGL::GroupPtr subScene );
+		void buildGroups( const IECoreGL::NameStateComponent *nameState, IECoreGL::Group *subScene );
 		
 		std::string relativePathName( IECore::SceneInterface::Path path );
 		/// Returns concatenated matrix from current sceneInterface path to given scene
