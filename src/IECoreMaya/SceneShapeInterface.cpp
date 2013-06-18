@@ -58,6 +58,7 @@
 #include "IECorePython/ScopedGILLock.h"
 #include "IECorePython/ScopedGILRelease.h"
 
+#include "IECore/MatrixAlgo.h"
 #include "IECore/VectorOps.h"
 #include "IECore/MessageHandler.h"
 #include "IECore/SimpleTypedData.h"
@@ -1018,7 +1019,7 @@ void SceneShapeInterface::recurseBuildScene( IECoreGL::Renderer * renderer, cons
 
 	M44f transform;
 	transform.setValue( transformd );
-	renderer->setTransform( transform );
+	renderer->setTransform( transform );	/// todo: can't we use concat transform?
 
 	if( drawGeometry && subSceneInterface->hasObject() )
 	{
@@ -1043,8 +1044,6 @@ void SceneShapeInterface::recurseBuildScene( IECoreGL::Renderer * renderer, cons
 		}
 
 		/// disable instancing for objects that we will update (also for the bounds if drawn).
-//\todo This slows down a lot the load times because we don't have a cache of primVars triangulation and work is redone for each instance....
-/// \todo should it have another attribute to force copyOnInstancing? or an attribute in the rednerer "gl:willEditScene" that does the same?
 		if ( m_sceneCanUpdate && subSceneInterface->hasAttribute( SceneCache::animatedObjectPrimVarsAttribute ) )
 		{
 			renderer->setAttribute("gl:automaticInstancing", new BoolData( false ) );
@@ -1171,28 +1170,31 @@ void SceneShapeInterface::updateScene()
 		currPath.insert( currPath.end(), relativePath.begin(), relativePath.end() );
 
 		ConstSceneInterfacePtr childScene = mainScene->scene( currPath );
-		if ( !childScene->hasObject() )
-		{
-			continue;
-		}
-
-		InternedStringVectorDataPtr varNames(0);
-		if ( childScene->hasAttribute( SceneCache::animatedObjectPrimVarsAttribute ) )
-		{
-			varNames = runTimeCast< InternedStringVectorData >( childScene->readAttribute( SceneCache::animatedObjectPrimVarsAttribute, time ) );
-		}
-
-		if ( !varNames )
-		{
-			continue;
-		}
 
 		const IECoreGL::Group *group = it->second.second;
-		const IECoreGL::Group::ChildContainer &children = group->children();
 
+		/// update children's transform
+		const IECoreGL::Group::ChildContainer &children = group->children();
 		IECoreGL::Group::ChildContainer::const_iterator it = children.begin();
-		if ( drawGeometry )
+		Imath::M44f m = IECore::convert< Imath::M44f, Imath::M44d >( childScene->readTransformAsMatrix(time) );
+		for ( ; it != children.end(); ++it )
 		{
+			if ( (*it)->typeId() == (IECore::TypeId)IECoreGL::GroupTypeId )
+			{
+				IECoreGL::Group *gChild = staticPointerCast< IECoreGL::Group >( *it );
+				gChild->setTransform( m );
+			}
+		}
+
+		it = children.begin();
+		if ( drawGeometry && childScene->hasObject() )
+		{
+			InternedStringVectorDataPtr varNames(0);
+			if ( childScene->hasAttribute( SceneCache::animatedObjectPrimVarsAttribute ) )
+			{
+				varNames = runTimeCast< InternedStringVectorData >( childScene->readAttribute( SceneCache::animatedObjectPrimVarsAttribute, time ) );
+			}
+
 			bool foundObject = false;
 			for ( ; it != children.end(); ++it )
 			{
@@ -1203,12 +1205,15 @@ void SceneShapeInterface::updateScene()
 					{
 						if ( !foundObject && (*it2)->typeId() == (IECore::TypeId)IECoreGL::MeshPrimitiveTypeId )
 						{
-							IECoreGL::MeshPrimitive *mesh = staticPointerCast< IECoreGL::MeshPrimitive >( *it2 );
-	
-							IECore::PrimitiveVariableMap varMap = childScene->readObjectPrimitiveVariables( varNames->readable(), time );
-							for ( IECore::PrimitiveVariableMap::const_iterator it = varMap.begin(); it != varMap.end(); it++ )
+							if ( varNames )
 							{
-								mesh->addPrimitiveVariable( it->first, it->second );
+								IECoreGL::MeshPrimitive *mesh = staticPointerCast< IECoreGL::MeshPrimitive >( *it2 );
+	
+								IECore::PrimitiveVariableMap varMap = childScene->readObjectPrimitiveVariables( varNames->readable(), time );
+								for ( IECore::PrimitiveVariableMap::const_iterator it3 = varMap.begin(); it3 != varMap.end(); it3++ )
+								{
+									mesh->addPrimitiveVariable( it3->first, it3->second );
+								}
 							}
 							foundObject = true;
 							break;
@@ -1216,7 +1221,10 @@ void SceneShapeInterface::updateScene()
 					}
 				}
 				if ( foundObject )
+				{
+					it++;
 					break;
+				}
 			}
 		}
 		if ( drawBounds )
