@@ -980,6 +980,9 @@ void SceneShapeInterface::buildScene( IECoreGL::RendererPtr renderer, ConstScene
 		}
 	}
 
+	/// we assume this scene can be updated and buildScene may find that this is not the case...		
+	m_sceneCanUpdate = true;
+
 	recurseBuildScene( renderer.get(), subSceneInterface.get(), time.as( MTime::kSeconds ), drawBounds, drawGeometry, objectOnly, drawTags );
 }
 
@@ -1112,9 +1115,6 @@ IECoreGL::ConstScenePtr SceneShapeInterface::glScene()
 			// Always draw locators. They can be hidden by using tags.
 			renderer->setOption( "gl:drawCoordinateSystems", new BoolData( true ) );
 
-			/// we assume this scene can be updated and buildScene may find that this is not the case...		
-			m_sceneCanUpdate = true;
-
 			renderer->worldBegin();
 			{
 				buildScene( renderer, sceneInterface );
@@ -1173,16 +1173,20 @@ void SceneShapeInterface::updateScene()
 
 		const IECoreGL::Group *group = it->second.second;
 
-		/// update children's transform
 		const IECoreGL::Group::ChildContainer &children = group->children();
 		IECoreGL::Group::ChildContainer::const_iterator it = children.begin();
-		Imath::M44f m = IECore::convert< Imath::M44f, Imath::M44d >( childScene->readTransformAsMatrix(time) );
-		for ( ; it != children.end(); ++it )
+
+		if ( name.value() != "/" )
 		{
-			if ( (*it)->typeId() == (IECore::TypeId)IECoreGL::GroupTypeId )
+			/// update children's transform
+			Imath::M44f m = IECore::convert< Imath::M44f, Imath::M44d >( childScene->readTransformAsMatrix(time) );
+			for ( ; it != children.end(); ++it )
 			{
-				IECoreGL::Group *gChild = staticPointerCast< IECoreGL::Group >( *it );
-				gChild->setTransform( m );
+				if ( (*it)->typeId() == (IECore::TypeId)IECoreGL::GroupTypeId )
+				{
+					IECoreGL::Group *gChild = staticPointerCast< IECoreGL::Group >( *it );
+					gChild->setTransform( m );
+				}
 			}
 		}
 
