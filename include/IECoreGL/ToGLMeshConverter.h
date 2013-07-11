@@ -68,7 +68,7 @@ class ToGLMeshConverter : public ToGLConverter
 
 	private :
 	
-		class CreateNormalsConverter;
+		class CalculateNormals;
 
 		static ConverterDescription<ToGLMeshConverter> g_description;
 

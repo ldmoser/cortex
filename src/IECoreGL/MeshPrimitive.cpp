@@ -36,7 +36,6 @@
 
 #include "IECore/DespatchTypedData.h"
 #include "IECore/TriangulateOp.h"
-#include "IECore/DespatchTypedData.h"
 #include "IECore/MurmurHash.h"
 
 #include "IECoreGL/MeshPrimitive.h"
