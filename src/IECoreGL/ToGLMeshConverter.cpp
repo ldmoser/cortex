@@ -47,7 +47,7 @@ using namespace IECoreGL;
 
 
 //////////////////////////////////////////////////////////////////////////
-// CreateNormalsConverter
+// CalculateNormals
 //////////////////////////////////////////////////////////////////////////
 
 class ToGLMeshConverter::CalculateNormals
@@ -128,6 +128,52 @@ class ToGLMeshConverter::CalculateNormals
 
 };
 
+//////////////////////////////////////////////////////////////////////////
+// BuildST
+//////////////////////////////////////////////////////////////////////////
+
+class ToGLMeshConverter::BuildST
+{
+	public :
+
+		BuildST( const IECore::FloatVectorData *s, const IECore::FloatVectorData *t ) : m_s(s), m_t(t)
+		{
+		}
+
+		/// hash function used by CachedConverter.
+		IECore::MurmurHash hash( const IECore::Object *object ) const
+		{
+			IECore::MurmurHash h;
+			h.append( "BuildST");
+			m_s->hash(h);
+			m_t->hash(h);
+			return h;
+		}
+
+		/// call operator used by the CachedConverter.
+		IECore::RunTimeTypedPtr operator()( const IECore::Object *object )
+		{
+			const std::vector<float> &s = m_s->readable();
+			const std::vector<float> &t = m_t->readable();
+
+			IECore::V2fVectorDataPtr stData = new IECore::V2fVectorData();
+			std::vector<Imath::V2f> &st = stData->writable();
+			st.reserve( s.size() );
+
+			for ( unsigned i = 0; i < s.size(); i++ )
+			{
+				st.push_back( Imath::V2f( s[i], t[i] ) );
+			}
+
+			return stData;
+		}
+
+		private :
+
+			const IECore::FloatVectorData *m_s;
+			const IECore::FloatVectorData *m_t;
+};
+
 
 //////////////////////////////////////////////////////////////////////////
 // ToGLMeshConverter
@@ -206,7 +252,11 @@ IECore::RunTimeTypedPtr ToGLMeshConverter::doConversion( IECore::ConstObjectPtr 
 			{
 				tIt = pIt;
 			}
-			glMesh->addPrimitiveVariable( pIt->first, pIt->second );
+			else
+			{
+				/// any other prim var is added here.
+				glMesh->addPrimitiveVariable( pIt->first, pIt->second );
+			}
 		}
 		else
 		{
@@ -221,22 +271,18 @@ IECore::RunTimeTypedPtr ToGLMeshConverter::doConversion( IECore::ConstObjectPtr 
 		if ( sIt->second.interpolation == tIt->second.interpolation && 
 			 sIt->second.interpolation != IECore::PrimitiveVariable::Constant )
 		{
-			IECore::ConstFloatVectorDataPtr s = IECore::runTimeCast< const IECore::FloatVectorData >( sIt->second.data );
-			IECore::ConstFloatVectorDataPtr t = IECore::runTimeCast< const IECore::FloatVectorData >( tIt->second.data );
+			IECore::ConstFloatVectorDataPtr sPtr = IECore::runTimeCast< const IECore::FloatVectorData >( sIt->second.data );
+			IECore::ConstFloatVectorDataPtr tPtr = IECore::runTimeCast< const IECore::FloatVectorData >( tIt->second.data );
 
-			if ( s && t )
+			if ( sPtr && tPtr )
 			{
 				/// Should hold true if primvarsAreValid
-				assert( s->readable().size() == t->readable().size() );
+				assert( sPtr->readable().size() == tPtr->readable().size() );
 
-				IECore::V2fVectorDataPtr stData = new IECore::V2fVectorData();
-				stData->writable().resize( s->readable().size() );
-
-				for ( unsigned i = 0; i < s->readable().size(); i++ )
-				{
-					stData->writable()[i] = Imath::V2f( s->readable()[i], t->readable()[i] );
-				}
-				glMesh->addPrimitiveVariable( "st", IECore::PrimitiveVariable( sIt->second.interpolation, stData ) );
+				CachedConverterPtr cachedConverter = CachedConverter::defaultCachedConverter();
+				BuildST buildST( sPtr, tPtr );
+				IECore::ConstDataPtr stData = IECore::staticPointerCast< const IECore::Data >( cachedConverter->convert( sPtr, buildST ) );
+				glMesh->addPrimitiveVariable( "st", IECore::PrimitiveVariable( sIt->second.interpolation, stData->copy() ) );
 			}
 			else
 			{
