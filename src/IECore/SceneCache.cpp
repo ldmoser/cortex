@@ -723,7 +723,7 @@ class SceneCache::ReaderImplementation : public SceneCache::Implementation
 					CacheKey currentKey(reader,sample);
 
 					// if constant topology and the object is not in the cache, we try to build it from another frame
-					if ( !reader->hasAttribute(animatedObjectTopologyAttribute) && sample != defaultSample && !objectCache.cached(currentKey) )
+					if ( reader->hasAttribute(animatedObjectPrimVarsAttribute) && sample != defaultSample && !objectCache.cached(currentKey) )
 					{
 						CacheKey defaultKey(reader,defaultSample);
 
