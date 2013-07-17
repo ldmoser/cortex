@@ -713,7 +713,7 @@ class SceneCache::ReaderImplementation : public SceneCache::Implementation
 				/// utility function used by the ReaderImplementation to use the LRUCache for transform reading
 				IECore::DataPtr readTransformAtSample( const ReaderImplementation *reader, size_t sample )
 				{
-					return runTimeCast< Data >( transformCache.get( CacheKey(reader,sample) ) );
+					return runTimeCast< Data >( transformCache.get( CacheKey(reader,sample) ) )->copy();
 				}
 
 				/// utility function used by the ReaderImplementation to use the LRUCache for object reading
@@ -746,13 +746,13 @@ class SceneCache::ReaderImplementation : public SceneCache::Implementation
 					}
 					/// Could not create the object from another time sample or the object has non-constant topology... 
 					// so we load the entire object
-					return staticPointerCast< Object >( objectCache.get( currentKey ) );
+					return staticPointerCast< Object >( objectCache.get( currentKey ) )->copy();
 				}
 
 				/// utility function used by the ReaderImplementation to use the LRUCache for attribute reading
 				IECore::ObjectPtr readAttributeAtSample( const ReaderImplementation *reader, const SceneCache::Name &name, size_t sample )
 				{
-					return staticPointerCast< Object >( attributeCache.get( CacheKey(reader,sample,name) ) );
+					return staticPointerCast< Object >( attributeCache.get( CacheKey(reader,sample,name) ) )->copy();
 				}
 
 				static IECore::RunTimeTypedPtr transformGetter( const CacheKey &key, size_t &cost )
