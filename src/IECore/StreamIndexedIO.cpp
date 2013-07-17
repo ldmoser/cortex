@@ -369,6 +369,7 @@ class StreamIndexedIO::Node : public BaseNode
 
 		const IndexedIO::EntryID &name() const;
 		void path( IndexedIO::EntryIDList &result ) const;
+		std::string pathAsString() const;
 
 		bool hasChild( const IndexedIO::EntryID &name ) const;
 
@@ -649,6 +650,37 @@ DataNode* StreamIndexedIO::Node::addDataChild( const IndexedIO::EntryID &childNa
 	return child;
 }
 
+std::string StreamIndexedIO::Node::pathAsString() const
+{
+	IndexedIO::EntryIDList p;
+	path(p);
+	std::string path;
+	if ( !p.size() )
+	{
+		path = "/";
+	}
+	else
+	{
+		size_t totalLength = 0;
+		for ( IndexedIO::EntryIDList::const_iterator it = p.begin(); it != p.end(); it++ )
+		{
+			totalLength += it->value().size();
+		}
+		totalLength += p.size();
+	
+		path.resize( totalLength );
+		std::string::iterator sit = path.begin();
+		for ( IndexedIO::EntryIDList::const_iterator it = p.begin(); it != p.end(); it++ )
+		{
+			*sit++ = '/';
+			const std::string &str = it->value();
+			path.replace( sit, sit + str.size(), str );
+			sit += str.size();
+		}
+	}
+	return path;
+}
+
 void StreamIndexedIO::Node::path( IndexedIO::EntryIDList &result ) const
 {
 	if ( m_parent )
@@ -697,7 +729,7 @@ void StreamIndexedIO::Node::removeChild( const IndexedIO::EntryID &childName, bo
 	{
 		if (throwException)
 		{
-			throw IOException( "StreamIndexedIO:Node:removeChild: Entry not found '" + childName.value() + "'" );
+			throw IOException( "StreamIndexedIO:Node:removeChild: Entry not found '" + childName.value() + "' at " + pathAsString() );
 		}
 		return;
 	}
@@ -1988,7 +2020,7 @@ IndexedIO::Entry StreamIndexedIO::entry(const IndexedIO::EntryID &name) const
 
 	if (!node)
 	{
-		throw IOException( "StreamIndexedIO: Entry not found '" + name.value() + "'" );
+		throw IOException( "StreamIndexedIO: Entry not found '" + name.value() + "' at " + m_node->pathAsString() );
 	}
 
 	if ( node->entryType() == IndexedIO::File )
@@ -2120,7 +2152,7 @@ void StreamIndexedIO::read(const IndexedIO::EntryID &name, InternedString *&x, u
 
 	if (!node)
 	{
-		throw IOException( "StreamIndexedIO: Entry not found '" + name.value() + "'" );
+		throw IOException( "StreamIndexedIO: Entry not found '" + name.value() + "' at " + m_node->pathAsString() );
 	}
 
 	Imf::Int64 *ids = new Imf::Int64[arrayLength];
@@ -2265,7 +2297,7 @@ void StreamIndexedIO::read(const IndexedIO::EntryID &name, T *&x, unsigned long 
 
 	if (!node)
 	{
-		throw IOException( "StreamIndexedIO: Entry not found '" + name.value() + "'" );
+		throw IOException( "StreamIndexedIO: Entry not found '" + name.value() + "' at " + m_node->pathAsString() );
 	}
 
 	StreamIndexedIO::StreamFile &f = streamFile();
@@ -2289,7 +2321,7 @@ void StreamIndexedIO::rawRead(const IndexedIO::EntryID &name, T *&x, unsigned lo
 
 	if (!node)
 	{
-		throw IOException( "StreamIndexedIO: Entry not found '" + name.value() + "'" );
+		throw IOException( "StreamIndexedIO: Entry not found '" + name.value() + "' at " + m_node->pathAsString() );
 	}
 
 	Imf::Int64 size = node->m_size;
@@ -2316,7 +2348,7 @@ void StreamIndexedIO::read(const IndexedIO::EntryID &name, T &x) const
 
 	if (!node)
 	{
-		throw IOException( "StreamIndexedIO: Entry not found '" + name.value() + "'" );
+		throw IOException( "StreamIndexedIO: Entry not found '" + name.value() + "' at " + m_node->pathAsString() );
 	}
 
 	Imf::Int64 size = node->m_size;
@@ -2340,7 +2372,7 @@ void StreamIndexedIO::rawRead(const IndexedIO::EntryID &name, T &x) const
 
 	if (!node)
 	{
-		throw IOException( "StreamIndexedIO: Entry not found '" + name.value() + "'" );
+		throw IOException( "StreamIndexedIO: Entry not found '" + name.value() + "' at " + m_node->pathAsString() );
 	}
 
 	Imf::Int64 size = node->m_size;
