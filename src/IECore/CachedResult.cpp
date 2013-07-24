@@ -124,31 +124,6 @@ bool CachedResult::cached( const MurmurHash &key )
 	return m_data->cache.cached(key);
 }
 
-ConstObjectPtr CachedResult::get( const MurmurHash &key )
-{
-	MemberData::CacheKey cacheKey(key, compute, m_data->objectCache);
-
-	MurmurHash objectHash = m_data->cache.get( key );
-	ConstObjectPtr obj = cacheKey.object;
-
-	if ( !obj )
-	{
-		if ( objectHash == MurmurHash() )
-		{
-			return 0;
-		}
-		/// we retrieved the hash from the cache, now we have to retrieve the object itself...
-		obj = m_data->objectCache->get(objectHash);
-		if ( !obj && compute )
-		{
-			/// object is not in the cache anymore... recompute and register back in the ObjectCache
-			obj = compute();
-			obj = m_data->objectCache->set( obj );
-		}
-	}
-	return obj;
-}
-
 ConstObjectPtr CachedResult::get( const MurmurHash &key, ComputeFn compute )
 {
 	MemberData::CacheKey cacheKey(key, compute, m_data->objectCache);
