@@ -690,38 +690,52 @@ class SceneCache::ReaderImplementation : public SceneCache::Implementation
 				/// utility function used by the ReaderImplementation to use the LRUCache for object reading
 				IECore::ObjectPtr readObjectAtSample( const ReaderImplementation *reader, size_t sample )
 				{
-/*					const size_t defaultSample = 0;
-					CacheKey currentKey(reader,sample);
+					const size_t defaultSample = -1;
 
 					// if constant topology and the object is not in the cache, we try to build it from another frame
-					if ( reader->hasAttribute(animatedObjectPrimVarsAttribute) && sample != defaultSample && !objectCache.cached(currentKey) )
+					if ( reader->hasAttribute(animatedObjectPrimVarsAttribute) )
 					{
-						CacheKey defaultKey(reader,defaultSample);
+						/// Could not create the object from another time sample... so we load the entire object
+						SceneInterface::Path p;
+						reader->path(p);
+						MurmurHash currentKey = pathHash(p,sample);
+						MurmurHash defaultKey = pathHash(p,defaultSample);
 
-						if ( objectCache.cached(defaultKey) )
+						if ( !objectCache->cached(currentKey) )
 						{
-							IECore::InternedStringVectorDataPtr varNames = runTimeCast<InternedStringVectorData>( reader->readAttributeAtSample(animatedObjectPrimVarsAttribute, 0) );
-							if ( varNames )
+							/// ok, try to build the object from another frame...
+							if ( objectCache->cached( defaultKey ) )
 							{
-								PrimitivePtr prim= runTimeCast< Primitive >( objectCache.get( defaultKey ) );
-								if ( prim )
+								ConstObjectPtr defaultObj = objectCache->get( defaultKey, 0 );
+								if ( defaultObj )
 								{
-									prim = prim->copy();
-									// we managed to load the object from a different time sample from the cache, just have to load the changing prim vars...
-									mergeMaps( prim->variables, readObjectPrimitiveVariablesAtSample( reader->m_indexedIO, varNames->readable(), sample ) );
-									objectCache.set( currentKey, prim, prim->Object::memoryUsage() );
-									return prim;
+									IECore::InternedStringVectorDataPtr varNames = runTimeCast<InternedStringVectorData>( reader->readAttributeAtSample(animatedObjectPrimVarsAttribute, 0) );
+									if ( varNames )
+									{
+										PrimitivePtr prim= runTimeCast< Primitive >( defaultObj->copy() );
+										if ( prim )
+										{
+											// we managed to load the object from a different time sample from the cache, just have to load the changing prim vars...
+											mergeMaps( prim->variables, readObjectPrimitiveVariablesAtSample( reader->m_indexedIO, varNames->readable(), sample ) );
+											objectCache->set( currentKey, prim );
+											return prim;
+										}
+									}
 								}
 							}
 						}
+						/// ok, we don't have the object even from other times in the cache... load it from the file then.
+						ConstObjectPtr obj = objectCache->get( currentKey, boost::bind(&ReaderImplementation::_readObjectAtSample, reader, sample) );
+						objectCache->set( defaultKey, obj );
+						return const_cast< Object * >( obj.get() );
+	//					return obj->copy();
+
 					}
-*/
-					/// Could not create the object from another time sample or the object has non-constant topology... 
-					// so we load the entire object
+					/// The object has animated topology... so we load the entire object
 					SceneInterface::Path p;
 					reader->path(p);
 
-					ConstObjectPtr obj = staticPointerCast< const Object >( objectCache->get( pathHash(p,sample), boost::bind(&ReaderImplementation::_readObjectAtSample, reader, sample) ) );
+					ConstObjectPtr obj = objectCache->get( pathHash(p,sample), boost::bind(&ReaderImplementation::_readObjectAtSample, reader, sample) );
 					return const_cast< Object * >( obj.get() );
 //					return obj->copy();
 				}
@@ -733,7 +747,7 @@ class SceneCache::ReaderImplementation : public SceneCache::Implementation
 					reader->path(p);
 					p.push_back( name );
 
-					ConstObjectPtr attr = staticPointerCast< const Object >( attributeCache->get( pathHash(p,sample), boost::bind(&ReaderImplementation::_readAttributeAtSample, reader, name, sample) ) );
+					ConstObjectPtr attr = attributeCache->get( pathHash(p,sample), boost::bind(&ReaderImplementation::_readAttributeAtSample, reader, name, sample) );
 					return const_cast< Object * >( attr.get() );
 //					return attr->copy();
 				}

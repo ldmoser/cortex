@@ -48,6 +48,7 @@ IE_CORE_FORWARDDECLARE( CachedResult )
 /// the computation results, and internally it only holds a map of computationHash =>objectHash. The get functions will return the resulting 
 /// Object, which should be copied prior to modification.
 /// \todo Consider instead using a map computationHash => object weak pointer. That would require only one map query per get() if results are still cached.
+/// \todo Stop using LRUCache for two reasons: we don't need to store the cost, we are hacking it by providing a getter function that tests if the compute is NULL. The most natural way would be to have a get in LRUCache that would not compute, just a query...
 class CachedResult : public RefCounted
 {
 	public :
@@ -81,7 +82,11 @@ class CachedResult : public RefCounted
 
 		bool cached( const MurmurHash &key );
 
+		/// If compute is NULL and is not cached, the get will cache the NULL object.
 		ConstObjectPtr get( const MurmurHash &key, ComputeFn compute );
+
+		/// Sets an object to the cache
+		void set( const MurmurHash &key, ConstObjectPtr obj );
 
 	private :
 
